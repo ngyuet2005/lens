@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>透鏡光線模擬</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #fff; font-family: 'Georgia', serif; overflow: hidden; user-select: none; }
+  #canvas { display: block; }
+
+  #ui {
+    position: fixed; top: 20px; left: 20px;
+    background: rgba(255,255,255,0.96); border: 1.5px solid #ddd; border-radius: 12px;
+    padding: 18px 20px; min-width: 230px; box-shadow: 0 4px 24px rgba(0,0,0,0.09); z-index: 100;
+  }
+  #ui h2 { font-size: 15px; font-weight: bold; color: #222; margin-bottom: 14px;
+    letter-spacing: 0.5px; border-bottom: 1.5px solid #eee; padding-bottom: 8px; }
+  .ctrl-group { margin-bottom: 13px; }
+  .ctrl-label { font-size: 12px; color: #555; margin-bottom: 4px;
+    display: flex; justify-content: space-between; align-items: center; }
+  .ctrl-label span { color: #222; font-weight: bold; font-size: 13px; }
+  input[type=range] { width: 100%; accent-color: #2563eb; cursor: pointer; height: 4px; }
+  .lens-toggle { display: flex; border: 1.5px solid #2563eb; border-radius: 8px; overflow: hidden; margin-bottom: 14px; }
+  .lens-btn { flex: 1; padding: 7px 0; border: none; background: #fff; color: #2563eb;
+    font-size: 13px; cursor: pointer; transition: all 0.2s; font-family: inherit; }
+  .lens-btn.active { background: #2563eb; color: #fff; font-weight: bold; }
+
+  /* bottom-left info panel */
+  #info {
+    position: fixed; bottom: 20px; left: 20px;
+    background: rgba(255,255,255,0.96); border: 1.5px solid #ddd; border-radius: 10px;
+    padding: 12px 16px; font-size: 12px; color: #444;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.07); z-index: 100; min-width: 210px; line-height: 1.85;
+  }
+  #info b { color: #2563eb; }
+  #info .hint { color: #999; font-size: 11px; margin-top: 6px; border-top: 1px solid #eee; padding-top: 5px; }
+
+  /* bottom-right magnification panel */
+  #mag-panel {
+    position: fixed; bottom: 20px; right: 20px;
+    background: rgba(255,255,255,0.96); border: 1.5px solid #ddd; border-radius: 10px;
+    padding: 12px 16px; font-size: 12px; color: #444;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.07); z-index: 100; min-width: 200px; line-height: 1.85;
+  }
+  #mag-panel .title { font-weight: bold; color: #222; font-size: 13px;
+    border-bottom: 1px solid #eee; padding-bottom: 5px; margin-bottom: 6px; }
+  #mag-panel .formula { font-family: 'Georgia', serif; color: #555; font-size: 12px; }
+  #mag-panel .result { color: #2563eb; font-weight: bold; font-size: 14px; margin-top: 4px; }
+  #mag-panel .step { color: #666; font-size: 12px; line-height: 1.7; }
+
+  #legend {
+    position: fixed; top: 20px; right: 20px;
+    background: rgba(255,255,255,0.96); border: 1.5px solid #ddd; border-radius: 10px;
+    padding: 12px 16px; font-size: 12px; color: #444;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.07); z-index: 100; line-height: 2.1;
+  }
+  .legend-row { display: flex; align-items: center; gap: 8px; }
+  .leg-solid { width: 32px; height: 2px; display: inline-block; }
+  .leg-dash { width: 32px; height: 0; border-top: 2px dashed; display: inline-block; }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<div id="ui">
+  <h2>透鏡光線模擬</h2>
+  <div class="lens-toggle">
+    <button class="lens-btn active" id="btn-convex">凸透鏡</button>
+    <button class="lens-btn" id="btn-concave">凹透鏡</button>
+  </div>
+  <div class="ctrl-group">
+    <div class="ctrl-label">物距 u <span id="val-u">15.0</span> cm</div>
+    <input type="range" id="sl-u" min="1" max="1000" value="150" step="1">
+  </div>
+  <div class="ctrl-group">
+    <div class="ctrl-label">焦距 f <span id="val-f">12.0</span> cm</div>
+    <input type="range" id="sl-f" min="10" max="300" value="120" step="1">
+  </div>
+  <div class="ctrl-group">
+    <div class="ctrl-label">物高 h <span id="val-h">6.0</span> cm</div>
+    <input type="range" id="sl-h" min="5" max="200" value="60" step="1">
+  </div>
+  <div class="ctrl-group">
+    <div class="ctrl-label">透鏡大小 <span id="val-ls">160</span> px</div>
+    <input type="range" id="sl-ls" min="60" max="350" value="160" step="1">
+  </div>
+</div>
+
+<div id="info">
+  <div>物距 u：<b id="info-u">15.0</b> cm</div>
+  <div>焦距 f：<b id="info-f">12.0</b> cm</div>
+  <div>像距 v：<b id="info-v">—</b> cm</div>
+  <div>像的性質：<b id="info-type">—</b></div>
+  <div class="hint">拖頂端↕調高度　拖軸身↔調物距</div>
+</div>
+
+<div id="mag-panel">
+  <div class="title">放大率計算</div>
+  <div class="step" id="mag-formula">m = v / u</div>
+  <div class="step" id="mag-step">= — / —</div>
+  <div class="result" id="mag-result">m = —</div>
+</div>
+
+<div id="legend">
+  <div class="legend-row"><span class="leg-solid" style="background:#e53935"></span> 平行主軸光線</div>
+  <div class="legend-row"><span class="leg-dash" style="border-color:#e53935"></span> 延長虛線</div>
+  <div class="legend-row"><span class="leg-solid" style="background:#2e7d32"></span> 穿過光心</div>
+  <div class="legend-row"><span class="leg-solid" style="background:#1565c0"></span> 實像</div>
+  <div class="legend-row"><span class="leg-dash" style="border-color:#1565c0"></span> 虛像</div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let W, H, cx, cy;
+
+// scale: px per cm (used for display labels only, internal coords still in px)
+// We keep internal state in px but show labels in cm (÷10)
+const PX_PER_CM = 10;
+
+function pxToCm(px) { return (px / PX_PER_CM).toFixed(1); }
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  cx = W / 2; cy = H / 2;
+  // Update u slider max dynamically to reach left edge
+  const maxU = Math.max(100, cx - 20);
+  document.getElementById('sl-u').max = maxU;
+  draw();
+}
+window.addEventListener('resize', resize);
+
+// Internal state in px
+let state = { lensType: 'convex', u: 150, f: 120, h: 60, lensSize: 160 };
+
+document.getElementById('btn-convex').onclick = () => { state.lensType = 'convex'; updateBtns(); draw(); };
+document.getElementById('btn-concave').onclick = () => { state.lensType = 'concave'; updateBtns(); draw(); };
+function updateBtns() {
+  document.getElementById('btn-convex').classList.toggle('active', state.lensType === 'convex');
+  document.getElementById('btn-concave').classList.toggle('active', state.lensType === 'concave');
+}
+
+// Sliders: value in px internally, display in cm
+document.getElementById('sl-u').addEventListener('input', function() {
+  state.u = +this.value;
+  document.getElementById('val-u').textContent = pxToCm(state.u);
+  draw();
+});
+document.getElementById('sl-f').addEventListener('input', function() {
+  state.f = +this.value;
+  document.getElementById('val-f').textContent = pxToCm(state.f);
+  draw();
+});
+document.getElementById('sl-h').addEventListener('input', function() {
+  state.h = +this.value;
+  document.getElementById('val-h').textContent = pxToCm(state.h);
+  draw();
+});
+document.getElementById('sl-ls').addEventListener('input', function() {
+  state.lensSize = +this.value;
+  document.getElementById('val-ls').textContent = this.value;
+  draw();
+});
+
+// ── Physics ───────────────────────────────────────────────────────────
+function computeImage() {
+  const f = state.lensType === 'convex' ? state.f : -state.f;
+  const u_signed = -state.u; // real object: u < 0
+  const inv_v = 1/f + 1/u_signed; // lens eqn: 1/v - 1/u = 1/f  →  1/v = 1/f + 1/u
+  if (Math.abs(inv_v) < 1e-9) return { v: Infinity, m: Infinity, imgH: 0, real: true, f };
+  const v = 1 / inv_v;
+  const m = v / u_signed;
+  return { v, m, imgH: m * state.h, real: v > 0, f };
+}
+
+function updateInfo(img) {
+  const uCm = pxToCm(state.u);
+  const fCm = pxToCm(state.f);
+  document.getElementById('info-u').textContent = uCm;
+  document.getElementById('info-f').textContent = fCm;
+  document.getElementById('val-u').textContent = uCm;
+  document.getElementById('val-f').textContent = fCm;
+  document.getElementById('val-h').textContent = pxToCm(state.h);
+
+  if (!isFinite(img.v)) {
+    document.getElementById('info-v').textContent = '∞';
+    document.getElementById('info-type').textContent = '無窮遠';
+    document.getElementById('mag-step').textContent = '= ∞';
+    document.getElementById('mag-result').textContent = 'm = ∞';
+  } else {
+    const vCm = pxToCm(Math.abs(img.v));
+    document.getElementById('info-v').textContent = vCm + (img.real ? ' cm (右)' : ' cm (左·虛)');
+    const sz = Math.abs(img.m) > 1.005 ? '放大' : Math.abs(img.m) < 0.995 ? '縮小' : '等大';
+    const or = img.m < -0.001 ? '倒立' : '正立';
+    document.getElementById('info-type').textContent = (img.real ? '實像' : '虛像') + '、' + or + '、' + sz;
+
+    // Magnification panel
+    const vSigned = img.v / PX_PER_CM; // cm, signed
+    const uSigned = -state.u / PX_PER_CM; // cm, signed (negative)
+    document.getElementById('mag-formula').textContent = 'm = v ÷ u';
+    document.getElementById('mag-step').textContent =
+      `= (${vSigned.toFixed(1)}) ÷ (${uSigned.toFixed(1)})`;
+    document.getElementById('mag-result').textContent = `m = ${img.m.toFixed(3)}`;
+  }
+}
+
+// ── Draw helpers ──────────────────────────────────────────────────────
+
+// Draw a line segment (no arrowhead)
+function drawLine(x1, y1, x2, y2, color, lw, dash=[]) {
+  ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.setLineDash(dash);
+  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+// Draw a filled triangular arrowhead at (x,y) pointing in direction `angle`
+function drawArrowHead(x, y, angle, color, size=9) {
+  ctx.save();
+  ctx.fillStyle = color; ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(x + Math.cos(angle)*size,          y + Math.sin(angle)*size);
+  ctx.lineTo(x + Math.cos(angle+2.5)*size*0.52, y + Math.sin(angle+2.5)*size*0.52);
+  ctx.lineTo(x + Math.cos(angle-2.5)*size*0.52, y + Math.sin(angle-2.5)*size*0.52);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+// Draw a ray segment with ONE mid-point arrowhead showing travel direction
+// The arrowhead always points from (x1,y1) toward (x2,y2)
+function ray(x1, y1, x2, y2, color, lw, dash=[]) {
+  drawLine(x1, y1, x2, y2, color, lw, dash);
+  const mx = (x1+x2)*0.5, my = (y1+y2)*0.5;
+  const angle = Math.atan2(y2-y1, x2-x1);
+  drawArrowHead(mx, my, angle, color, 8);
+}
+
+// Draw a multi-segment ray as a SINGLE continuous line, with ONE arrowhead per segment
+// but ensuring the whole path is drawn first then arrows placed
+function raySegments(pts, color, lw, dash=[]) {
+  // Draw full polyline
+  ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.setLineDash(dash);
+  ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i=1; i<pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.stroke(); ctx.setLineDash([]);
+  // One mid-arrow per segment
+  for (let i=0; i<pts.length-1; i++) {
+    const [x1,y1]=pts[i], [x2,y2]=pts[i+1];
+    const mx=(x1+x2)*0.5, my=(y1+y2)*0.5;
+    const angle = Math.atan2(y2-y1, x2-x1);
+    drawArrowHead(mx, my, angle, color, 8);
+  }
+}
+
+// Vertical arrow for object/image: base at (x,baseY), tip at (x,tipY)
+// Arrowhead at TIP pointing AWAY from base (proper physics arrow)
+function vertArrow(x, baseY, tipY, color, dash=[]) {
+  ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.setLineDash(dash);
+  ctx.beginPath(); ctx.moveTo(x, baseY); ctx.lineTo(x, tipY); ctx.stroke();
+  ctx.setLineDash([]);
+  const angle = tipY < baseY ? -Math.PI/2 : Math.PI/2;
+  drawArrowHead(x, tipY, angle, color, 11);
+}
+
+// ── Lens Symbol ───────────────────────────────────────────────────────
+function drawLens() {
+  const lx = cx, hs = state.lensSize, c = '#2563eb', asz = 16;
+  ctx.save(); ctx.strokeStyle = c; ctx.fillStyle = c; ctx.lineWidth = 2.8; ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo(lx, cy-hs); ctx.lineTo(lx, cy+hs); ctx.stroke();
+  if (state.lensType === 'convex') {
+    // ▲ top (outward up)
+    ctx.beginPath(); ctx.moveTo(lx, cy-hs-asz); ctx.lineTo(lx-asz*0.55, cy-hs); ctx.lineTo(lx+asz*0.55, cy-hs); ctx.closePath(); ctx.fill();
+    // ▼ bottom (outward down)
+    ctx.beginPath(); ctx.moveTo(lx, cy+hs+asz); ctx.lineTo(lx-asz*0.55, cy+hs); ctx.lineTo(lx+asz*0.55, cy+hs); ctx.closePath(); ctx.fill();
+  } else {
+    // ▼ top (inward, tip at top end, base above)
+    ctx.beginPath(); ctx.moveTo(lx, cy-hs); ctx.lineTo(lx-asz*0.55, cy-hs-asz); ctx.lineTo(lx+asz*0.55, cy-hs-asz); ctx.closePath(); ctx.fill();
+    // ▲ bottom (inward, tip at bottom end, base below)
+    ctx.beginPath(); ctx.moveTo(lx, cy+hs); ctx.lineTo(lx-asz*0.55, cy+hs+asz); ctx.lineTo(lx+asz*0.55, cy+hs+asz); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ── Rays ──────────────────────────────────────────────────────────────
+function drawRays(img) {
+  if (!isFinite(img.v)) return;
+
+  const lx = cx;
+  const objX = cx - state.u;
+  const objTipY = cy - state.h;
+  const f = img.f;
+  const imgX = cx + img.v;
+  const imgTipY = cy - img.imgH;
+  const FAR = 1200;
+  const DASH = [7,5];
+  const C1 = '#e53935', C2 = '#2e7d32';
+
+  // ═══ RAY 1: Parallel to axis ═══════════════════════════════════════
+  // Incoming: object tip → lens (horizontal, leftward to right)
+  ray(objX, objTipY, lx, objTipY, C1, 1.8);
+
+  if (state.lensType === 'convex') {
+    const rfx = lx + f; // right focal point x
+    const dx = rfx-lx, dy = cy-objTipY;
+    const len = Math.sqrt(dx*dx+dy*dy);
+    const ndx=dx/len, ndy=dy/len;
+
+    if (img.real) {
+      // Real image: refracted ray goes to image tip then continues
+      ray(lx, objTipY, imgX, imgTipY, C1, 1.8);
+      ray(imgX, imgTipY, imgX+ndx*160, imgTipY+ndy*160, C1, 1.2);
+    } else {
+      // Virtual image (obj inside f): refracted ray diverges to the right
+      ray(lx, objTipY, lx+ndx*FAR, objTipY+ndy*FAR, C1, 1.8);
+      // Dashed back-extension to virtual image (travels BACKWARD = right to left)
+      ray(lx, objTipY, imgX, imgTipY, C1, 1.3, DASH);
+    }
+  } else {
+    // Concave: f<0, virtual focal at (lx+f, cy) on LEFT side
+    const vfx = lx+f;
+    const odx=lx-vfx, ody=objTipY-cy;
+    const olen=Math.sqrt(odx*odx+ody*ody);
+    const ondx=odx/olen, ondy=ody/olen;
+    ray(lx, objTipY, lx+ondx*FAR, objTipY+ondy*FAR, C1, 1.8);
+    // Dashed from lens point back to virtual focal (traces backward)
+    ray(lx, objTipY, vfx, cy, C1, 1.3, DASH);
+  }
+
+  // ═══ RAY 2: Through optical centre ══════════════════════════════════
+  // This ray is a STRAIGHT line from object tip through centre, continuing to right.
+  // We draw it as TWO segments: obj→centre, centre→end
+  // Each segment gets exactly ONE mid-arrow, both pointing in the SAME direction.
+
+  // Direction vector from obj tip through centre (lens), continuing onward
+  const totalDx = imgX + (imgX-objX)*0.3 - objX; // doesn't matter, we compute direction
+  const rayDx = lx - objX;   // x from obj to centre
+  const rayDy = cy - objTipY; // y from obj to centre
+  const rLen = Math.sqrt(rayDx*rayDx + rayDy*rayDy);
+  const rNdx = rayDx/rLen, rNdy = rayDy/rLen; // unit vector in travel direction
+
+  // Segment A: object tip → centre (always real, going toward lens)
+  ray(objX, objTipY, lx, cy, C2, 1.8);
+
+  if (img.real) {
+    // Segment B: centre → image tip (still going same direction)
+    ray(lx, cy, imgX, imgTipY, C2, 1.8);
+    // Segment C: beyond image
+    ray(imgX, imgTipY, imgX+rNdx*160, imgTipY+rNdy*160, C2, 1.2);
+  } else {
+    // Segment B: centre → extends far to the right (real ray continues)
+    ray(lx, cy, lx+rNdx*FAR, cy+rNdy*FAR, C2, 1.8);
+    // Dashed back-extension to virtual image (arrow points from centre BACK to virtual image = leftward)
+    ray(lx, cy, imgX, imgTipY, C2, 1.3, DASH);
+  }
+
+  // ═══ Image arrow ════════════════════════════════════════════════════
+  vertArrow(imgX, cy, imgTipY, '#1565c0', img.real ? [] : DASH);
+}
+
+// ── Main draw ─────────────────────────────────────────────────────────
+function draw() {
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#fff'; ctx.fillRect(0,0,W,H);
+
+  // grid
+  ctx.strokeStyle='#f0f0f0'; ctx.lineWidth=1; ctx.setLineDash([]);
+  const gs=40;
+  for (let x=cx%gs; x<W; x+=gs){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for (let y=cy%gs; y<H; y+=gs){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+  // principal axis
+  ctx.strokeStyle='#bbb'; ctx.lineWidth=1.5; ctx.setLineDash([8,6]);
+  ctx.beginPath(); ctx.moveTo(0,cy); ctx.lineTo(W,cy); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // focal points
+  const f = state.lensType==='convex' ? state.f : -state.f;
+  ctx.fillStyle='#f59e0b';
+  [cx+f, cx-f].forEach(fx => {
+    ctx.beginPath(); ctx.arc(fx,cy,5,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#92400e'; ctx.font='italic 13px Georgia';
+    ctx.fillText('F', fx+7, cy-8); ctx.fillStyle='#f59e0b';
+  });
+  ctx.fillStyle='#d97706';
+  [cx+2*f, cx-2*f].forEach(x2f => {
+    ctx.beginPath(); ctx.arc(x2f,cy,3,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#92400e'; ctx.font='italic 11px Georgia';
+    ctx.fillText('2F', x2f+5, cy-6); ctx.fillStyle='#d97706';
+  });
+
+  const img = computeImage();
+  updateInfo(img);
+
+  drawRays(img);
+  drawLens();
+
+  // centre dot
+  ctx.fillStyle='#2563eb'; ctx.setLineDash([]);
+  ctx.beginPath(); ctx.arc(cx,cy,3.5,0,Math.PI*2); ctx.fill();
+
+  // object arrow
+  const objX = cx - state.u;
+  vertArrow(objX, cy, cy-state.h, '#1a1a1a');
+  ctx.font='13px Georgia'; ctx.fillStyle='#1a1a1a'; ctx.setLineDash([]);
+  ctx.fillText('物體', objX+9, cy-state.h-9);
+
+  // image label
+  if (isFinite(img.v)) {
+    const imgX = cx+img.v;
+    ctx.fillStyle = img.real ? '#1565c0' : '#5c6bc0'; ctx.font='13px Georgia';
+    ctx.fillText(img.real ? '實像' : '虛像', imgX+9, cy-img.imgH-9);
+  }
+
+  ctx.fillStyle='#aaa'; ctx.font='11px Georgia'; ctx.setLineDash([]);
+  ctx.fillText('主軸', 10, cy-6);
+}
+
+// ── Drag ──────────────────────────────────────────────────────────────
+let dragging = null;
+
+canvas.addEventListener('mousedown', e => {
+  const mx=e.clientX, my=e.clientY;
+  const objX=cx-state.u, tipY=cy-state.h;
+  if (Math.abs(mx-objX)<18 && Math.abs(my-tipY)<18) { dragging='tip'; return; }
+  if (Math.abs(mx-objX)<14 && my>tipY-5 && my<cy+15) { dragging='shaft'; return; }
+});
+
+canvas.addEventListener('mousemove', e => {
+  const mx=e.clientX, my=e.clientY;
+  if (!dragging) {
+    const objX=cx-state.u, tipY=cy-state.h;
+    if (Math.abs(mx-objX)<18 && Math.abs(my-tipY)<18) canvas.style.cursor='ns-resize';
+    else if (Math.abs(mx-objX)<14 && my>tipY-5 && my<cy+15) canvas.style.cursor='ew-resize';
+    else canvas.style.cursor='default';
+    return;
+  }
+  if (dragging==='tip') {
+    const newH = cy-my;
+    state.h = Math.max(5, Math.min(200, newH));
+    document.getElementById('sl-h').value = Math.round(state.h);
+    document.getElementById('val-h').textContent = pxToCm(state.h);
+  }
+  if (dragging==='shaft') {
+    const maxU = Math.max(100, cx-20);
+    state.u = Math.max(1, Math.min(maxU, cx-mx));
+    document.getElementById('sl-u').value = Math.round(state.u);
+    document.getElementById('val-u').textContent = pxToCm(state.u);
+  }
+  draw();
+});
+
+canvas.addEventListener('mouseup', () => { dragging=null; });
+canvas.addEventListener('mouseleave', () => { dragging=null; });
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const t=e.touches[0];
+  canvas.dispatchEvent(new MouseEvent('mousedown',{clientX:t.clientX,clientY:t.clientY}));
+},{passive:false});
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const t=e.touches[0];
+  canvas.dispatchEvent(new MouseEvent('mousemove',{clientX:t.clientX,clientY:t.clientY}));
+},{passive:false});
+canvas.addEventListener('touchend', ()=>{ dragging=null; });
+
+resize();
+</script>
+</body>
+</html>
